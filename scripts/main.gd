@@ -27,7 +27,10 @@ const DECK_LIFT_TIME := 0.7     # départ lent d'une carte piochée par un ordin
 const SHIRT_COLORS := [Color(0.2, 0.3, 0.6), Color(0.7, 0.2, 0.2), Color(0.2, 0.55, 0.3), Color(0.55, 0.3, 0.6)]
 const SKIN_COLORS := [Color(0.95, 0.8, 0.68), Color(0.85, 0.65, 0.5), Color(0.6, 0.42, 0.3), Color(0.98, 0.85, 0.75)]
 const HAIR_COLORS := [Color.BLACK, Color(0.85, 0.35, 0.1), Color(0.08, 0.06, 0.05), Color(0.9, 0.82, 0.5)]
-const HIGHLIGHT := Color(1.0, 0.95, 0.5)
+const LIGHT_FOLLOW_SPEED := 2.2  # plus c'est bas, plus la lumière de tour est en retard
+const LIGHT_ENERGY_BOT := 5.0    # lumière de tour sur un ordinateur...
+const LIGHT_ENERGY_HUMAN := 1.6  # ...et sur toi (plus douce : tes cartes sont dessous)
+const HIGHLIGHT :=Color(1.0, 0.95, 0.5)
 
 static var autostart_seed := -1   # tests : graine fixe
 static var bot_delay_override := -1.0
@@ -43,6 +46,11 @@ var seats: Array[Node3D] = []
 var name_labels: Array[Label3D] = []
 var turn_light: SpotLight3D
 var deck_stack: MeshInstance3D
+var _light_pos := Vector3(0, 1.3, 0)
+var _light_goal := Vector3(0, 1.3, 0)
+var _light_aim := Vector3(0, 0, 0.3)  # jamais à la verticale de la lumière (orientation indéfinie)
+var _light_aim_goal := Vector3(0, 0, 0.3)
+var _light_energy_goal := 5.0
 
 var _hovered := -1
 var _selected: Array = []          # cartes choisies (BAB#25)
@@ -136,7 +144,7 @@ func _build_environment() -> void:
 	env.background_color = Color(0.06, 0.05, 0.08)
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	env.ambient_light_color = Color(0.75, 0.7, 0.75)
-	env.ambient_light_energy = 0.55
+	env.ambient_light_energy = 0.4
 	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
 	var world_env := WorldEnvironment.new()
 	world_env.environment = env
@@ -145,17 +153,49 @@ func _build_environment() -> void:
 	var lamp := OmniLight3D.new()
 	lamp.position = Vector3(0, 1.6, 0.2)
 	lamp.omni_range = 4.0
-	lamp.light_energy = 1.3
+	lamp.light_energy = 1.1
 	lamp.light_color = Color(1.0, 0.92, 0.8)
 	lamp.shadow_enabled = true
 	add_child(lamp)
 
+	# Lumière au-dessus du joueur qui joue (comme dans Nervous) : elle suit le joueur actif avec un peu de retard.
 	turn_light = SpotLight3D.new()
-	turn_light.spot_range = 3.0
-	turn_light.spot_angle = 16.0
-	turn_light.light_energy = 3.0
+	turn_light.spot_range = 2.5
+	turn_light.spot_angle = 18.0
+	turn_light.spot_attenuation = 0.6
+	turn_light.light_energy = 5.0
 	turn_light.light_color = Color(1.0, 0.95, 0.6)
+	turn_light.shadow_enabled = true
+	turn_light.visible = false
 	add_child(turn_light)
+
+
+# Vise le joueur actif : un ordinateur est éclairé avec ses cartes, toi ce sont tes cartes sur la table.
+func _aim_turn_light(p: int) -> void:
+	var playing := game.phase != "over" and game.phase != "end"
+	if not playing:
+		turn_light.visible = false
+		return
+	var seat := seats[p]
+	_light_goal = seat.position * 0.7 + Vector3(0, 1.4, 0)
+	_light_aim_goal = seat.to_global(Vector3(0, 0, -0.35) if p == HUMAN else Vector3(0, 0.2, 0.0))
+	_light_energy_goal = LIGHT_ENERGY_HUMAN if p == HUMAN else LIGHT_ENERGY_BOT  # tes cartes restent lisibles
+	if not turn_light.visible:  # premier allumage : directement en place
+		_light_pos = _light_goal
+		_light_aim = _light_aim_goal
+		turn_light.light_energy = _light_energy_goal
+		turn_light.visible = true
+
+
+func _process(delta: float) -> void:
+	if not turn_light.visible:
+		return
+	# La lumière traîne derrière le joueur actif et le rattrape.
+	var t := minf(1.0, delta * LIGHT_FOLLOW_SPEED)
+	_light_pos = _light_pos.lerp(_light_goal, t)
+	_light_aim = _light_aim.lerp(_light_aim_goal, t)
+	turn_light.light_energy = lerpf(turn_light.light_energy, _light_energy_goal, t)
+	turn_light.look_at_from_position(_light_pos, _light_aim)
 
 
 func _build_table() -> void:
@@ -592,10 +632,7 @@ func _refresh_hud() -> void:
 		var label := name_labels[p]
 		label.text = "%s (%d)" % [game.names[p], game.hands[p].size()]
 		label.modulate = HIGHLIGHT if p == game.current and game.phase != "over" else Color.WHITE
-	var a := _seat_angle(game.current)
-	var seat_pos := Vector3(sin(a), 0, cos(a)) * (SEAT_RADIUS * 0.75)
-	turn_light.visible = game.phase != "over" and game.phase != "end"
-	turn_light.look_at_from_position(seat_pos + Vector3(0, 1.6, 0) + seat_pos * 0.2, seat_pos, Vector3.FORWARD)
+	_aim_turn_light(game.current)
 	var my_turn := game.current == HUMAN
 	match game.phase:
 		"draw":
