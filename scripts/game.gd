@@ -40,6 +40,10 @@ var rng := RandomNumberGenerator.new()
 var _answer = null
 signal _answered
 
+# Animation qui montre au joueur humain ce que fait un ordinateur (main.gd) ; le jeu attend sa fin.
+# Appelée avec (sorte, joueur, carte) : "deck" (pioche), "take" (prise dans la défausse), "discard".
+var present_hook := Callable()
+
 
 func start(seed_value := -1) -> void:
 	if seed_value >= 0:
@@ -122,16 +126,20 @@ func _bot_turn(p: int) -> void:
 	var plan: Dictionary = await _think(func(): return Bot.plan_turn(hand, disc, deck_size, ctx))
 	match plan.kind:
 		"discard":
+			await _present("take", p, plan.card)
 			_take_from_discard(p, plan.card)
 		"detector":
 			await _use_detector(p)
 			return
 		"baba":
+			for card in plan.take:
+				await _present("take", p, card)
 			_baba_take(p, plan.take)
 			await _wait(bot_delay)
 			await _discard_cards(p, plan.drop)
 			return
 		_:
+			await _present("deck", p, deck.back())
 			_draw_from_deck(p)
 	await _wait(bot_delay)
 	var hand2: Array = hands[p].duplicate()
@@ -153,6 +161,12 @@ func _think(task: Callable) -> Variant:
 		await get_tree().process_frame
 	WorkerThreadPool.wait_for_task_completion(id)
 	return _thought
+
+
+func _present(kind: String, p: int, card: int) -> void:
+	if humans[p] or not present_hook.is_valid():
+		return
+	await present_hook.call(kind, p, card)
 
 
 func _draw_from_deck(p: int) -> void:
@@ -183,6 +197,7 @@ func _baba_take(p: int, cards: Array) -> void:
 # DET#43 : défausser DET#43, regarder les 3 cartes du dessus de la pioche, en garder une.
 func _use_detector(p: int) -> void:
 	phase = "busy"
+	await _present("discard", p, DET)
 	hands[p].erase(DET)
 	discard.append(DET)
 	message.emit("%s défausse DET#43 et regarde les 3 cartes du dessus de la pioche." % names[p])
@@ -195,6 +210,7 @@ func _use_detector(p: int) -> void:
 	var ctx := score_ctx()
 	var hand: Array = hands[p]
 	var pick: int = await _ask(p, "detector", {"options": top}, func(): return Bot.pick_best(hand, top, ctx))
+	await _present("deck", p, pick)
 	deck.erase(pick)
 	hands[p].append(pick)
 	changed.emit()
@@ -207,8 +223,10 @@ func _discard_cards(p: int, cards: Array) -> void:
 	phase = "busy"
 	var replay := false
 	for card in cards:
+		await _present("discard", p, card)
 		hands[p].erase(card)
 		discard.append(card)
+		changed.emit()
 	message.emit("%s défausse %s." % [names[p], ", ".join(cards.map(func(c): return CardDB.code(c)))])
 	changed.emit()
 	if cards.has(MOD) and deck.has(SAN1):
@@ -351,6 +369,7 @@ func _end_effect(p: int, effect: int) -> void:
 			var pick: int = await _ask(p, "end_take", {"options": options, "effect": effect},
 				func(): return Bot.pick_from_discard(hand, options, ctx))
 			if pick > 0:
+				await _present("take", p, pick)
 				discard.erase(pick)
 				hands[p].append(pick)
 				message.emit("%s prend %s dans la défausse (RAD#42)." % [names[p], CardDB.code(pick)])
@@ -361,12 +380,16 @@ func _end_effect(p: int, effect: int) -> void:
 			var pick: int = await _ask(p, "end_take", {"options": options, "effect": effect},
 				func(): return Bot.pick_from_discard(hand, options, ctx))
 			if pick > 0:
+				await _present("take", p, pick)
 				discard.erase(pick)
 				hands[p].append(pick)
 				message.emit("%s prend %s dans la défausse (SHE#54)." % [names[p], CardDB.code(pick)])
 		1:  # SAN#1 : piocher une carte, SAN#1 part dans la défausse
 			if not deck.is_empty():
+				await _present("deck", p, deck.back())
 				hands[p].append(deck.pop_back())
+				changed.emit()
+			await _present("discard", p, SAN1)
 			hands[p].erase(SAN1)
 			discard.append(SAN1)
 			message.emit("%s pioche une carte et place SAN#1 dans la défausse." % names[p])

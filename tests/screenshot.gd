@@ -18,6 +18,7 @@ var _autoplay := false
 var _over_since := -1.0
 var _main: Node
 var _hand_done := false
+var _timed := false  # partie automatique : capture à [secondes] si elles sont données
 var _choices_since := -1.0
 
 
@@ -27,6 +28,7 @@ func _initialize() -> void:
 		_out = args[0]
 	if args.size() > 1:
 		_wait = float(args[1])
+		_timed = true
 	_autoplay = OS.has_environment("SHOT_AUTOPLAY")
 	if OS.has_environment("SHOT_SEED"):
 		Main.autostart_seed = int(OS.get_environment("SHOT_SEED"))
@@ -38,6 +40,13 @@ func _initialize() -> void:
 func _process(delta: float) -> bool:
 	if _autoplay:
 		_play()
+		if _timed:
+			_wait -= delta
+			if OS.has_environment("SHOT_EVERY"):
+				_series(delta)
+			if _wait <= 0.0:
+				_capture()
+				return false
 		if _choices_since >= 0.0:
 			_choices_since += delta
 			if _choices_since > 1.2:
@@ -100,6 +109,20 @@ func _on_choice(kind: String, data: Dictionary) -> void:
 			value = load("res://scripts/scoring.gd").best(data.hand, data.ctx).choices
 	# Ferme la fenêtre de question comme le ferait un clic.
 	main.call_deferred("auto_answer", value)
+
+
+# SHOT_EVERY=0.2 : une capture toutes les 0,2 s jusqu'à [secondes] (<fichier>_000.png, …).
+var _series_left := 0.0
+var _series_n := 0
+
+
+func _series(delta: float) -> void:
+	_series_left -= delta
+	if _series_left > 0.0:
+		return
+	_series_left = float(OS.get_environment("SHOT_EVERY"))
+	root.get_texture().get_image().save_png(_out.get_basename() + "_%03d.png" % _series_n)
+	_series_n += 1
 
 
 # Échange des cartes pour donner au joueur 0 les cartes voulues.

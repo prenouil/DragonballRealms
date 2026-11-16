@@ -19,6 +19,11 @@ const DECK_POS := Vector3(0.47, 0.0, -0.1)
 const CAMERA_POS := Vector3(0, 0.92, 1.2)
 const CAMERA_TARGET := Vector3(0, 0.05, -0.2)
 const MOVE_TIME := 0.35
+const PRESENT_TIME := 1.0       # durée pendant laquelle la carte d'un ordinateur est montrée
+const PRESENT_MOVE := 0.5       # trajet jusqu'à la présentation
+const PRESENT_SCALE := 1.8      # carte agrandie pendant la présentation
+const PRESENT_DISTANCE := 0.55  # distance de la carte présentée à la caméra
+const DECK_LIFT_TIME := 0.7     # départ lent d'une carte piochée par un ordinateur
 const SHIRT_COLORS := [Color(0.2, 0.3, 0.6), Color(0.7, 0.2, 0.2), Color(0.2, 0.55, 0.3), Color(0.55, 0.3, 0.6)]
 const SKIN_COLORS := [Color(0.95, 0.8, 0.68), Color(0.85, 0.65, 0.5), Color(0.6, 0.42, 0.3), Color(0.98, 0.85, 0.75)]
 const HAIR_COLORS := [Color.BLACK, Color(0.85, 0.35, 0.1), Color(0.08, 0.06, 0.05), Color(0.9, 0.82, 0.5)]
@@ -89,6 +94,7 @@ func _ready() -> void:
 	game.message.connect(_on_message)
 	game.choice_requested.connect(_on_choice_requested)
 	game.game_over.connect(_on_game_over)
+	game.present_hook = _present_card
 	game.start.call_deferred(autostart_seed)
 
 
@@ -501,6 +507,8 @@ func _layout() -> void:
 		var mat: StandardMaterial3D = _card_mats[id]
 		var lit := _selected.has(id) or choices.card_pending(id)
 		mat.albedo_color = Color(0.35, 0.35, 0.35) if game.masked_discard.has(id) else (HIGHLIGHT if lit else Color.WHITE)
+		if node.has_meta("held"):
+			continue  # en cours de présentation
 		if in_deck:
 			node.visible = false
 			node.transform = target
@@ -521,7 +529,50 @@ func _move(node: Node3D, target: Transform3D) -> void:
 	var tw := create_tween().set_parallel(true).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 	tw.tween_property(node, "position", target.origin, MOVE_TIME)
 	tw.tween_property(node, "quaternion", target.basis.get_rotation_quaternion(), MOVE_TIME)
+	if not node.scale.is_equal_approx(Vector3.ONE):
+		tw.tween_property(node, "scale", Vector3.ONE, MOVE_TIME)
 	node.set_meta("tween", tw)
+
+
+func _kill_tween(node: Node3D) -> void:
+	if node.has_meta("tween"):
+		var old: Tween = node.get_meta("tween")
+		if old and old.is_valid():
+			old.kill()
+
+
+# Montre au joueur humain une action d'un ordinateur ; game.gd attend la fin avant de continuer.
+# "deck" : la carte quitte lentement la pioche ; "take" / "discard" : la carte vient se présenter
+# face à la caméra pendant PRESENT_TIME, puis la mise en place normale l'emmène à destination.
+func _present_card(kind: String, p: int, card: int) -> void:
+	var node: Node3D = card_nodes[card]
+	node.set_meta("held", true)
+	_kill_tween(node)
+	if kind == "deck":
+		node.visible = true
+		node.scale = Vector3.ONE
+		node.transform = Transform3D(Basis(Vector3.RIGHT, PI / 2.0), DECK_POS + Vector3(0, deck_stack.scale.y + 0.003, 0))
+		var lift := create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+		lift.tween_property(node, "position", node.position + Vector3(0, 0.1, 0), DECK_LIFT_TIME)
+		await lift.finished
+	else:
+		node.visible = true
+		var forward := (CAMERA_TARGET - CAMERA_POS).normalized()
+		var pos := CAMERA_POS + forward * PRESENT_DISTANCE
+		var basis := Basis.looking_at(pos - CAMERA_POS, Vector3.UP)
+		var tw := create_tween().set_parallel(true).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+		tw.tween_property(node, "position", pos, PRESENT_MOVE)
+		tw.tween_property(node, "quaternion", basis.get_rotation_quaternion(), PRESENT_MOVE)
+		tw.tween_property(node, "scale", Vector3.ONE * PRESENT_SCALE, PRESENT_MOVE)
+		await tw.finished
+		var what := "prend cette carte dans la défausse" if kind == "take" else "défausse cette carte"
+		_show_zoom(card, "%s %s" % [game.names[p], what])
+		await get_tree().create_timer(PRESENT_TIME).timeout
+		if _hovered < 0:
+			zoom_panel.visible = false
+	node.remove_meta("held")
+	# Le jeu change l'état juste après : la mise en place suivante emmène la carte depuis ici.
+	node.set_meta("target", Transform3D(Basis(), Vector3(0, -100, 0)))
 
 
 func _sorted(cards: Array) -> Array:
