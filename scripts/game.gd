@@ -164,7 +164,8 @@ func _think(task: Callable) -> Variant:
 
 
 func _present(kind: String, p: int, card: int) -> void:
-	if humans[p] or not present_hook.is_valid():
+	# Les actions d'un ordinateur sont montrées ; pour toi, seulement la carte que tu pioches.
+	if not present_hook.is_valid() or (humans[p] and kind != "deck"):
 		return
 	await present_hook.call(kind, p, card)
 
@@ -265,6 +266,9 @@ func _human_can(p: int, wanted_phase: String) -> bool:
 
 func human_draw_deck(p: int) -> void:
 	if _human_can(p, "draw") and not deck.is_empty():
+		phase = "busy"
+		changed.emit()
+		await _present("deck", p, deck.back())
 		_draw_from_deck(p)
 
 

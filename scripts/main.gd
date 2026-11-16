@@ -18,7 +18,8 @@ const DISCARD_COLS := 5
 const DECK_POS := Vector3(0.47, 0.0, -0.1)
 const CAMERA_POS := Vector3(0, 0.92, 1.2)
 const CAMERA_TARGET := Vector3(0, 0.05, -0.2)
-const MOVE_TIME := 0.35
+const MOVE_TIME := 0.35        # petits mouvements (survol, tri de la main)
+const ACTION_MOVE := 0.6        # carte qui change de place (pioche, défausse, main), pour tous les joueurs
 const PRESENT_TIME := 1.0       # durée pendant laquelle la carte d'un ordinateur est montrée
 const PRESENT_MOVE := 0.5       # trajet jusqu'à la présentation
 const PRESENT_SCALE := 1.8      # carte agrandie pendant la présentation
@@ -540,9 +541,18 @@ func _layout() -> void:
 	deck_stack.visible = not game.deck.is_empty()
 	for id in game.deck:
 		_targets[id] = Transform3D(Basis(Vector3.RIGHT, PI / 2.0), DECK_POS + Vector3(0, h_deck, 0))
+	var zones := {}
+	for id in game.discard:
+		zones[id] = "discard"
+	for p in PLAYERS:
+		for id in game.hands[p]:
+			zones[id] = "hand%d" % p
 	for id in card_nodes:
 		var node: Node3D = card_nodes[id]
 		var in_deck := not placed.has(id)
+		var zone: String = zones.get(id, "deck")
+		var moved_zone: bool = node.get_meta("zone", "deck") != zone
+		node.set_meta("zone", zone)
 		var target: Transform3D = _targets.get(id, Transform3D(Basis(), DECK_POS))
 		var mat: StandardMaterial3D = _card_mats[id]
 		var lit := _selected.has(id) or choices.card_pending(id)
@@ -555,10 +565,10 @@ func _layout() -> void:
 			continue
 		if not node.visible:
 			node.visible = true
-		_move(node, target)
+		_move(node, target, ACTION_MOVE if moved_zone else MOVE_TIME)
 
 
-func _move(node: Node3D, target: Transform3D) -> void:
+func _move(node: Node3D, target: Transform3D, duration := MOVE_TIME) -> void:
 	if node.has_meta("target") and node.get_meta("target").is_equal_approx(target):
 		return
 	node.set_meta("target", target)
@@ -567,10 +577,10 @@ func _move(node: Node3D, target: Transform3D) -> void:
 		if old and old.is_valid():
 			old.kill()
 	var tw := create_tween().set_parallel(true).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
-	tw.tween_property(node, "position", target.origin, MOVE_TIME)
-	tw.tween_property(node, "quaternion", target.basis.get_rotation_quaternion(), MOVE_TIME)
+	tw.tween_property(node, "position", target.origin, duration)
+	tw.tween_property(node, "quaternion", target.basis.get_rotation_quaternion(), duration)
 	if not node.scale.is_equal_approx(Vector3.ONE):
-		tw.tween_property(node, "scale", Vector3.ONE, MOVE_TIME)
+		tw.tween_property(node, "scale", Vector3.ONE, duration)
 	node.set_meta("tween", tw)
 
 
@@ -581,9 +591,11 @@ func _kill_tween(node: Node3D) -> void:
 			old.kill()
 
 
-# Montre au joueur humain une action d'un ordinateur ; game.gd attend la fin avant de continuer.
-# "deck" : la carte quitte lentement la pioche ; "take" / "discard" : la carte vient se présenter
-# face à la caméra pendant PRESENT_TIME, puis la mise en place normale l'emmène à destination.
+# Montre au joueur humain une action d'un ordinateur (et la carte qu'il pioche lui-même) ;
+# game.gd attend la fin avant de continuer.
+# "deck" : la carte quitte lentement la pioche (si c'est toi, elle vient ensuite se présenter) ;
+# "take" / "discard" : la carte vient se présenter face à la caméra pendant PRESENT_TIME,
+# puis la mise en place normale l'emmène à destination.
 func _present_card(kind: String, p: int, card: int) -> void:
 	var node: Node3D = card_nodes[card]
 	node.set_meta("held", true)
@@ -595,7 +607,7 @@ func _present_card(kind: String, p: int, card: int) -> void:
 		var lift := create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 		lift.tween_property(node, "position", node.position + Vector3(0, 0.1, 0), DECK_LIFT_TIME)
 		await lift.finished
-	else:
+	if kind != "deck" or p == HUMAN:  # ta carte piochée se montre à toi, celle d'un ordinateur reste cachée
 		node.visible = true
 		var forward := (CAMERA_TARGET - CAMERA_POS).normalized()
 		var pos := CAMERA_POS + forward * PRESENT_DISTANCE
@@ -606,7 +618,7 @@ func _present_card(kind: String, p: int, card: int) -> void:
 		tw.tween_property(node, "scale", Vector3.ONE * PRESENT_SCALE, PRESENT_MOVE)
 		await tw.finished
 		var what := "prend cette carte dans la défausse" if kind == "take" else "défausse cette carte"
-		_show_zoom(card, "%s %s" % [game.names[p], what])
+		_show_zoom(card, "Tu pioches cette carte" if kind == "deck" else "%s %s" % [game.names[p], what])
 		await get_tree().create_timer(PRESENT_TIME).timeout
 		if _hovered < 0:
 			zoom_panel.visible = false
