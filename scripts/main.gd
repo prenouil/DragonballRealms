@@ -35,6 +35,12 @@ const DRAG_THRESHOLD := 8.0      # pixels avant qu'un appui sur une carte de ta 
 const ACTION_LIGHT_COLOR := Color(1.0, 0.3, 0.0)  # pioche et défausse quand c'est à toi de piocher
 const ACTION_LIGHT_ENERGY := 9.0
 const DISCARD_CENTER := Vector3(0, 0, -0.1)
+const SWAY_LIGHT_TURN := 0.07      # balancier des lumières : amplitude (mètres) au point visé
+const SWAY_LIGHT_DECK := 0.025
+const SWAY_LIGHT_DISCARD := 0.05
+const SWAY_HAND_BOT := 0.012       # balancement des mains des adversaires (mètres)...
+const SWAY_HAND_HUMAN := 0.005     # ...et de la tienne (plus discret pour rester lisible)
+const HOVER_SCALE := 1.12          # carte survolée un peu plus grande
 const LIGHT_FOLLOW_SPEED := 2.2  # plus c'est bas, plus la lumière de tour est en retard
 const LIGHT_ENERGY_BOT := 5.0    # lumière de tour sur un ordinateur...
 const LIGHT_ENERGY_HUMAN := 1.6  # ...et sur toi (plus douce : tes cartes sont dessous)
@@ -52,6 +58,9 @@ var _card_mats := {}      # numéro -> StandardMaterial3D du recto
 var _targets := {}        # numéro -> Transform3D visé
 var seats: Array[Node3D] = []
 var name_labels: Array[Label3D] = []
+var seat_arms: Array[Node3D] = []   # bras et mains de chaque adversaire (balancement)
+var _deck_hovered := false
+var _cursor := Input.CURSOR_ARROW
 var turn_light: SpotLight3D
 var deck_light: SpotLight3D
 var discard_light: SpotLight3D
@@ -95,6 +104,7 @@ var results_layer: CanvasLayer
 
 func _ready() -> void:
 	get_viewport().physics_object_picking = true
+	get_tree().node_added.connect(_on_node_added)
 	faces = CardFace.new()
 	add_child(faces)
 	faces.build()
@@ -202,8 +212,12 @@ func _action_light(target: Vector3, angle: float) -> SpotLight3D:
 	light.light_color = ACTION_LIGHT_COLOR
 	light.visible = false
 	add_child(light)
-	light.look_at_from_position(target + Vector3(0, 1.1, 0.08), target)
+	light.look_at_from_position(_light_from(target), target)
 	return light
+
+
+func _light_from(target: Vector3) -> Vector3:
+	return target + Vector3(0, 1.1, 0.08)
 
 
 # Vise le joueur actif : un ordinateur est éclairé avec ses cartes, toi ce sont tes cartes sur la table.
@@ -223,10 +237,47 @@ func _aim_turn_light(p: int) -> void:
 		turn_light.visible = true
 
 
+# Curseur en forme de main quand un clic à cet endroit déclenche une action.
+func _update_cursor() -> void:
+	var shape := Input.CURSOR_ARROW
+	if game == null or dialog_layer.get_child_count() > 0:
+		pass
+	elif _dragging:
+		shape = Input.CURSOR_DRAG
+	elif _deck_hovered and _discard_clickable() and _mode == "" and not game.deck.is_empty():
+		shape = Input.CURSOR_POINTING_HAND
+	elif _hovered >= 0 and _card_actionable(_hovered):
+		shape = Input.CURSOR_POINTING_HAND
+	if shape != _cursor:
+		_cursor = shape
+		Input.set_default_cursor_shape(shape)
+
+
+func _card_actionable(id: int) -> bool:
+	var loc := _card_location(id)
+	if loc == "discard":
+		return _discard_clickable()
+	if loc == "hand":
+		if choices.active():
+			return choices.handles(id)
+		if game.current != HUMAN:
+			return false
+		return game.phase == "discard" or (game.phase == "baba_discard" and id != Game.BAB)
+	return false
+
+
+# Les boutons de l'interface (et des fenêtres de choix) montrent aussi la main.
+func _on_node_added(node: Node) -> void:
+	if node is BaseButton:
+		(node as BaseButton).mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+
+
 # Les lumières de la pioche et de la défausse s'allument en douceur et pulsent légèrement.
 func _update_action_lights(delta: float) -> void:
 	var waiting := game != null and game.current == HUMAN and game.phase == "draw"
 	var pulse := 1.0 + 0.15 * sin(Time.get_ticks_msec() / 1000.0 * TAU * 0.6)
+	deck_light.look_at_from_position(_light_from(DECK_POS), DECK_POS + _swing(1, SWAY_LIGHT_DECK))
+	discard_light.look_at_from_position(_light_from(DISCARD_CENTER), DISCARD_CENTER + _swing(5, SWAY_LIGHT_DISCARD))
 	var on_deck := waiting and _mode == "" and not game.deck.is_empty()
 	var on_discard := waiting and (_mode == "" or _mode == "baba_take") and not game.discard.is_empty()
 	for pair in [[deck_light, on_deck], [discard_light, on_discard]]:
@@ -238,6 +289,8 @@ func _update_action_lights(delta: float) -> void:
 
 func _process(delta: float) -> void:
 	_update_action_lights(delta)
+	_update_sway()
+	_update_cursor()
 	if not turn_light.visible:
 		return
 	# La lumière traîne derrière le joueur actif et le rattrape.
@@ -245,7 +298,53 @@ func _process(delta: float) -> void:
 	_light_pos = _light_pos.lerp(_light_goal, t)
 	_light_aim = _light_aim.lerp(_light_aim_goal, t)
 	turn_light.light_energy = lerpf(turn_light.light_energy, _light_energy_goal, t)
-	turn_light.look_at_from_position(_light_pos, _light_aim)
+	turn_light.look_at_from_position(_light_pos, _light_aim + _swing(10, SWAY_LIGHT_TURN))
+
+
+# Mouvement lent et irrégulier : somme de sinus de fréquences sans rapport simple entre elles,
+# avec une graine par objet pour que chacun ait son propre rythme. Valeur entre -1 et 1 environ.
+func _wobble(seed: float) -> float:
+	var t := Time.get_ticks_msec() / 1000.0
+	var a := sin(t * 0.37 + seed * 12.9) * 0.5
+	a += sin(t * 0.61 * (1.0 + fmod(seed * 0.173, 0.4)) + seed * 4.1) * 0.3
+	a += sin(t * 1.13 * (1.0 + fmod(seed * 0.291, 0.3)) + seed * 7.7) * 0.2
+	return a
+
+
+# Décalage horizontal de balancier (pour viser un point qui oscille).
+func _swing(seed: float, amplitude: float) -> Vector3:
+	return Vector3(_wobble(seed), 0, _wobble(seed + 0.5)) * amplitude
+
+
+# Balancement des mains : cartes en main (et bras des adversaires), chaque joueur à son rythme.
+func _update_sway() -> void:
+	if game == null:
+		return
+	var holder := {}
+	for p in PLAYERS:
+		for id in game.hands[p]:
+			holder[id] = p
+	var offsets := []
+	var rolls := []
+	for p in PLAYERS:
+		var amp := SWAY_HAND_HUMAN if p == HUMAN else SWAY_HAND_BOT
+		var local := Vector3(_wobble(20 + p * 3), _wobble(21 + p * 3) * 0.6, _wobble(22 + p * 3) * 0.5) * amp
+		offsets.append(seats[p].basis * local)
+		rolls.append(_wobble(23 + p * 3) * amp * 4.0)
+		if p != HUMAN:
+			seat_arms[p].position = local
+			seat_arms[p].rotation.z = rolls[p] * 0.5
+	var over := game.phase == "over"
+	for id in card_nodes:
+		var node: Node3D = card_nodes[id]
+		var sway: Node3D = node.get_child(0)
+		var p: int = holder.get(id, -1)
+		if p < 0 or (over and p != HUMAN) or (_dragging and id == _press_card) or not node.visible:
+			sway.transform = Transform3D.IDENTITY
+			continue
+		# Décalage exprimé dans le repère de la carte (qui peut être tournée et agrandie).
+		sway.position = node.basis.inverse() * offsets[p]
+		sway.rotation = Vector3(0, 0, rolls[p])
 
 
 func _build_table() -> void:
@@ -327,6 +426,10 @@ func _build_seat(p: int) -> void:
 	label.position = Vector3(0, 0.68, 0.1) if p != HUMAN else Vector3(0, -10, 0)
 	root.add_child(label)
 	name_labels.append(label)
+	var arms := Node3D.new()
+	arms.name = "Arms"
+	root.add_child(arms)
+	seat_arms.append(arms)
 	if p == HUMAN:
 		return
 	var shirt: Color = SHIRT_COLORS[p]
@@ -339,10 +442,10 @@ func _build_seat(p: int) -> void:
 	for s in [-1.0, 1.0]:
 		_sphere(0.024, Color.WHITE, Vector3(s * 0.042, 0.015, -0.098), head)
 		_sphere(0.012, Color.BLACK, Vector3(s * 0.042, 0.015, -0.12), head)
-		# Bras qui tiennent les cartes.
-		var arm := _box(Vector3(0.07, 0.07, 0.3), shirt, Vector3(s * 0.17, 0.17, -0.06), root)
+		# Bras qui tiennent les cartes (ils se balancent avec les cartes).
+		var arm := _box(Vector3(0.07, 0.07, 0.3), shirt, Vector3(s * 0.17, 0.17, -0.06), arms)
 		arm.rotation.x = -0.5
-		_sphere(0.04, skin, Vector3(s * 0.07, 0.22, -0.2), root)
+		_sphere(0.04, skin, Vector3(s * 0.07, 0.22, -0.2), arms)
 	_box(Vector3(0.05, 0.01, 0.01), Color(0.5, 0.15, 0.15), Vector3(0, -0.05, -0.105), head)
 
 
@@ -360,8 +463,12 @@ func _build_cards() -> void:
 	back_mat.albedo_texture = faces.back
 	back_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
 	for id in CardDB.all_ids():
+		var root := Node3D.new()
+		root.name = "Card%d" % id
+		# Le balancement des mains déplace ce nœud intérieur, les déplacements de carte déplacent root.
 		var card := Node3D.new()
-		card.name = "Card%d" % id
+		card.name = "Sway"
+		root.add_child(card)
 		var front := MeshInstance3D.new()
 		front.mesh = quad
 		var m := StandardMaterial3D.new()
@@ -386,10 +493,10 @@ func _build_cards() -> void:
 		area.mouse_entered.connect(func(): _on_card_hover(id, true))
 		area.mouse_exited.connect(func(): _on_card_hover(id, false))
 		card.add_child(area)
-		card.visible = false
-		card.position = DECK_POS
-		add_child(card)
-		card_nodes[id] = card
+		root.visible = false
+		root.position = DECK_POS
+		add_child(root)
+		card_nodes[id] = root
 		_card_mats[id] = m
 
 
@@ -602,6 +709,8 @@ func _layout() -> void:
 		var pos := Vector3((col - (DISCARD_COLS - 1) / 2.0) * (CARD_W + 0.012), 0.002, -0.13 + row * (CARD_L + 0.012))
 		if _selected.has(id) or (id == _hovered and _discard_clickable()):
 			pos.y += 0.012
+		elif id == _hovered:
+			pos.y += 0.004  # agrandie : au-dessus de ses voisines
 		_targets[id] = Transform3D(Basis(Vector3.RIGHT, -PI / 2.0), pos)
 		placed[id] = true
 	# Pioche : cartes cachées sur le tas.
@@ -640,6 +749,8 @@ func _layout() -> void:
 			node.transform = target
 			node.set_meta("target", target)
 			continue
+		if id == _hovered and id != _pick and not _dragging:
+			target.basis = target.basis.scaled_local(Vector3.ONE * HOVER_SCALE)
 		_move(node, target, ACTION_MOVE if moved_zone else MOVE_TIME)
 
 
@@ -718,7 +829,7 @@ func _refresh_hud() -> void:
 	hud_counts.text = "Défausse : %d / %d     Pioche : %d" % [game.discard.size(), Game.DISCARD_LIMIT, game.deck.size()]
 	for p in PLAYERS:
 		var label := name_labels[p]
-		label.text = "%s (%d)" % [game.names[p], game.hands[p].size()]
+		label.text = game.names[p]
 		label.modulate = HIGHLIGHT if p == game.current and game.phase != "over" else Color.WHITE
 	_aim_turn_light(game.current)
 	var my_turn := game.current == HUMAN
@@ -966,6 +1077,7 @@ func _on_deck_input(event: InputEvent) -> void:
 
 
 func _set_deck_hover(on: bool) -> void:
+	_deck_hovered = on
 	deck_stack.material_override.albedo_color = HIGHLIGHT if on and _discard_clickable() and _mode == "" else Color(0.95, 0.93, 0.88)
 
 
