@@ -31,6 +31,10 @@ const HAIR_COLORS := [Color.BLACK, Color(0.85, 0.35, 0.1), Color(0.08, 0.06, 0.0
 const HAND_SCALE_WAIT := 0.75   # ta main pendant que les autres jouent...
 const HAND_SCALE_TURN := 1.15   # ...quand c'est à toi
 const PICK_SCALE := 1.6         # carte choisie pour être défaussée (2e clic : défausser)
+const DRAG_THRESHOLD := 8.0      # pixels avant qu'un appui sur une carte de ta main devienne un glisser
+const ACTION_LIGHT_COLOR := Color(1.0, 0.3, 0.0)  # pioche et défausse quand c'est à toi de piocher
+const ACTION_LIGHT_ENERGY := 9.0
+const DISCARD_CENTER := Vector3(0, 0, -0.1)
 const LIGHT_FOLLOW_SPEED := 2.2  # plus c'est bas, plus la lumière de tour est en retard
 const LIGHT_ENERGY_BOT := 5.0    # lumière de tour sur un ordinateur...
 const LIGHT_ENERGY_HUMAN := 1.6  # ...et sur toi (plus douce : tes cartes sont dessous)
@@ -49,6 +53,8 @@ var _targets := {}        # numéro -> Transform3D visé
 var seats: Array[Node3D] = []
 var name_labels: Array[Label3D] = []
 var turn_light: SpotLight3D
+var deck_light: SpotLight3D
+var discard_light: SpotLight3D
 var deck_stack: MeshInstance3D
 var _light_pos := Vector3(0, 1.3, 0)
 var _light_goal := Vector3(0, 1.3, 0)
@@ -59,6 +65,13 @@ var _light_energy_goal := 5.0
 var _hovered := -1
 var _selected: Array = []          # cartes choisies (BAB#25)
 var _pick := -1                    # carte de ta main choisie pour être défaussée
+var _hand_order: Array = []        # ordre de ta main (glisser-déposer ; carte piochée à droite)
+var _press_card := -1              # carte de ta main sous le bouton de la souris
+var _press_pos := Vector2.ZERO
+var _dragging := false
+var _drag_index := 0
+var _drag_point := Vector3.ZERO    # position de la carte tirée
+var _hand_spacing := CARD_W
 var _mode := ""                    # "", "baba_take", "baba_drop"
 var _discard_preview := {}         # carte de la main -> score si on la défausse
 var _messages: Array[String] = []
@@ -174,6 +187,24 @@ func _build_environment() -> void:
 	turn_light.visible = false
 	add_child(turn_light)
 
+	# À ton tour de piocher : deux lumières orangées sur la pioche et sur la défausse.
+	deck_light = _action_light(DECK_POS, 6.5)
+	discard_light = _action_light(DISCARD_CENTER, 15.0)
+
+
+func _action_light(target: Vector3, angle: float) -> SpotLight3D:
+	var light := SpotLight3D.new()
+	light.spot_range = 2.0
+	light.spot_angle = angle
+	light.spot_attenuation = 0.2
+	light.spot_angle_attenuation = 0.25  # bord net : une tache bien délimitée
+	light.light_energy = 0.0
+	light.light_color = ACTION_LIGHT_COLOR
+	light.visible = false
+	add_child(light)
+	light.look_at_from_position(target + Vector3(0, 1.1, 0.08), target)
+	return light
+
 
 # Vise le joueur actif : un ordinateur est éclairé avec ses cartes, toi ce sont tes cartes sur la table.
 func _aim_turn_light(p: int) -> void:
@@ -192,7 +223,21 @@ func _aim_turn_light(p: int) -> void:
 		turn_light.visible = true
 
 
+# Les lumières de la pioche et de la défausse s'allument en douceur et pulsent légèrement.
+func _update_action_lights(delta: float) -> void:
+	var waiting := game != null and game.current == HUMAN and game.phase == "draw"
+	var pulse := 1.0 + 0.15 * sin(Time.get_ticks_msec() / 1000.0 * TAU * 0.6)
+	var on_deck := waiting and _mode == "" and not game.deck.is_empty()
+	var on_discard := waiting and (_mode == "" or _mode == "baba_take") and not game.discard.is_empty()
+	for pair in [[deck_light, on_deck], [discard_light, on_discard]]:
+		var light: SpotLight3D = pair[0]
+		var goal: float = ACTION_LIGHT_ENERGY * pulse if pair[1] else 0.0
+		light.light_energy = move_toward(light.light_energy, goal, delta * ACTION_LIGHT_ENERGY * 3.0)
+		light.visible = light.light_energy > 0.01
+
+
 func _process(delta: float) -> void:
+	_update_action_lights(delta)
 	if not turn_light.visible:
 		return
 	# La lumière traîne derrière le joueur actif et le rattrape.
@@ -491,17 +536,28 @@ func _compute_discard_preview() -> void:
 func _layout() -> void:
 	var placed := {}
 	var over := game.phase == "over"
-	# Main du joueur, triée par famille, en éventail face à la caméra.
+	# Main du joueur, dans l'ordre choisi (glisser-déposer), en éventail face à la caméra.
 	# Petite quand les autres jouent, plus grande quand c'est à toi ; la carte à défausser grandit encore.
-	var hand: Array = _sorted(game.hands[HUMAN])
+	var hand: Array = _human_order()
+	if _dragging and hand.has(_press_card):  # la carte tirée laisse sa place libre là où elle sera posée
+		hand.erase(_press_card)
+		hand.insert(_drag_index, _press_card)
 	var n := hand.size()
 	var big := _hand_big()
 	var s := HAND_SCALE_TURN if big else HAND_SCALE_WAIT
 	var hand_y := 0.15 if big else 0.11
+	_hand_spacing = CARD_W * 0.95 * s
 	for k in n:
 		var id: int = hand[k]
-		var x := (k - (n - 1) / 2.0) * (CARD_W * 0.95) * s
+		var x := (k - (n - 1) / 2.0) * _hand_spacing
 		var pos := Vector3(x, hand_y - absf(x) * 0.08, 0.58)
+		if _dragging and id == _press_card:
+			# Carte tirée : elle suit la souris, devant les autres.
+			pos = _drag_point
+			var b := Basis.looking_at(pos - CAMERA_POS, Vector3.UP).scaled_local(Vector3.ONE * s * 1.1)
+			_targets[id] = Transform3D(b, pos)
+			placed[id] = true
+			continue
 		var lift := 0.0
 		if id == _hovered and _hand_clickable():
 			lift = 0.03
@@ -579,6 +635,11 @@ func _layout() -> void:
 			continue
 		if not node.visible:
 			node.visible = true
+		if _dragging and id == _press_card:
+			_kill_tween(node)
+			node.transform = target
+			node.set_meta("target", target)
+			continue
 		_move(node, target, ACTION_MOVE if moved_zone else MOVE_TIME)
 
 
@@ -795,6 +856,71 @@ func _pick_text(id: int) -> String:
 func _on_card_input(id: int, event: InputEvent) -> void:
 	if not (event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT):
 		return
+	if dialog_layer.get_child_count() > 0:
+		return
+	if game.hands[HUMAN].has(id):
+		# Carte de ta main : clic au relâchement, ou glisser-déposer si la souris bouge (voir _input).
+		_press_card = id
+		_press_pos = event.position
+		return
+	_click_card(id)
+
+
+# Ordre de ta main : celui que tu as choisi ; une carte qui arrive se place à droite.
+# Au début de la partie (main toute neuve), les cartes sont triées par famille.
+func _human_order() -> Array:
+	var hand: Array = game.hands[HUMAN]
+	var kept := _hand_order.filter(func(c): return hand.has(c))
+	if kept.is_empty():
+		_hand_order = _sorted(hand)
+	else:
+		_hand_order = kept
+		for c in hand:
+			if not _hand_order.has(c):
+				_hand_order.append(c)
+	return _hand_order.duplicate()
+
+
+# Glisser-déposer pour ranger ta main ; un appui-relâché sans bouger est un clic.
+func _input(event: InputEvent) -> void:
+	if _press_card < 0:
+		return
+	if event is InputEventMouseMotion:
+		if not _dragging and event.position.distance_to(_press_pos) > DRAG_THRESHOLD:
+			_dragging = true
+			_pick = -1
+			_drag_index = _human_order().find(_press_card)
+			zoom_panel.visible = false
+		if _dragging:
+			_update_drag(event.position)
+	elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
+		var id := _press_card
+		_press_card = -1
+		if _dragging:
+			_dragging = false
+			_hand_order.erase(id)
+			_hand_order.insert(_drag_index, id)
+			_layout()
+			_refresh_hud()
+		elif game.hands[HUMAN].has(id):
+			_click_card(id)
+		get_viewport().set_input_as_handled()
+
+
+func _update_drag(mouse: Vector2) -> void:
+	# Point de la souris au niveau de la main (plan vertical z = 0,58).
+	var from := camera.project_ray_origin(mouse)
+	var dir := camera.project_ray_normal(mouse)
+	var hit = Plane(Vector3.BACK, 0.58).intersects_ray(from, dir)
+	if hit == null:
+		return
+	_drag_point = hit - dir * 0.06  # sous la souris, un peu devant les autres cartes
+	var n: int = game.hands[HUMAN].size()
+	_drag_index = clampi(roundi(hit.x / _hand_spacing + (n - 1) / 2.0), 0, n - 1)
+	_layout()
+
+
+func _click_card(id: int) -> void:
 	if dialog_layer.get_child_count() > 0:
 		return
 	if choices.handles(id) and game.hands[HUMAN].has(id):

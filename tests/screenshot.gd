@@ -59,9 +59,33 @@ func _process(delta: float) -> bool:
 				_capture()
 		return false
 	_wait -= delta
+	if OS.has_environment("SHOT_DRAG"):
+		_drag(delta)
 	if _wait <= 0.0:
 		_capture()
 	return false
+
+
+# SHOT_DRAG=1 : après 1 s, tire la 1re carte de ta main vers la droite (la capture est prise en plein glisser).
+var _drag_time := 0.0
+var _drag_from := Vector2.ZERO
+
+
+func _drag(delta: float) -> void:
+	var main := current_scene
+	if main == null or not main.get("game") or main.game.hands.is_empty():
+		return
+	_drag_time += delta
+	if _drag_time < 1.0:
+		return
+	if main._press_card < 0:
+		var id: int = main._human_order()[0]
+		main._press_card = id
+		_drag_from = main.camera.unproject_position(main.card_nodes[id].global_position)
+		main._press_pos = _drag_from
+	var motion := InputEventMouseMotion.new()
+	motion.position = _drag_from + Vector2(minf(_drag_time - 1.0, 1.0) * 380.0, -40.0)
+	main._input(motion)
 
 
 func _play() -> void:
@@ -89,14 +113,11 @@ func _play() -> void:
 				drop = c
 				break
 		# Comme le joueur : 1er clic (la carte grandit), puis 2e clic 1 s plus tard (défausse).
-		var click := InputEventMouseButton.new()
-		click.pressed = true
-		click.button_index = MOUSE_BUTTON_LEFT
 		if main._pick != drop:
 			_pick_at = Time.get_ticks_msec()
-			main._on_card_input(drop, click)
+			main._click_card(drop)
 		elif Time.get_ticks_msec() - _pick_at > 1000:
-			main._on_card_input(drop, click)
+			main._click_card(drop)
 
 
 func _on_choice(kind: String, data: Dictionary) -> void:

@@ -17,7 +17,7 @@ Godot : `C:\Users\user\Desktop\Godot_v4.7.2-stable_win64.exe\Godot_v4.7.2-stable
 - Capture d'écran : `Godot --path . --script res://tests/screenshot.gd -- <fichier.png> [secondes]`
   (`SHOT_AUTOPLAY=1` joue la partie entière et capture l'écran de fin ; `SHOT_SEED`, `SHOT_SPEED`,
   `SHOT_HAND="37,44,52"` main imposée, `SHOT_CHOICES=1|picker` capture les choix du décompte ;
-  en partie automatique, [secondes] capture à cet instant, `SHOT_EVERY=0.25` une série d'images)
+  en partie automatique, [secondes] capture à cet instant, `SHOT_EVERY=0.25` une série d'images ; `SHOT_DRAG=1` capture un glisser-déposer dans la main)
 
 ## Organisation
 
