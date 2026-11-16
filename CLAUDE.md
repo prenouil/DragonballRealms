@@ -26,8 +26,9 @@ Godot : `C:\Users\user\Desktop\Godot_v4.7.2-stable_win64.exe\Godot_v4.7.2-stable
 - `scripts/game.gd` : déroulement (pioche, défausse, cartes spéciales, fin de partie) ; questions au joueur
   humain par `choice_requested` / `answer()` ; réflexion des ordinateurs dans un fil (`_think`).
 - `scripts/bot.gd` : décisions des ordinateurs (comparaison des scores).
-- `scripts/card_face.gd` : images des cartes rendues dans des SubViewport (illustration et texte floutés,
-  ou `res://cards/art/<numéro>.png`).
+- `scripts/card_face.gd` : images des cartes : `res://cards/faces/<numéro>.png` (cartes du document de l'auteur,
+  entièrement floutées : réduites à 9×12 pixels puis agrandies en 128×176 ; aucun détail reconnaissable ne
+  doit rester), sinon carte reconstruite dans un SubViewport.
 - `scripts/choices.gd` : choix du joueur humain au décompte et pour FIN DE PARTIE (cartes en surbrillance,
   fenêtres de tous les choix possibles, Annuler / Valider).
 - `scripts/main.gd` : table 3D, personnages, placement animé des 54 cartes, interface, fenêtres de choix, écran de fin.

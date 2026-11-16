@@ -1,6 +1,7 @@
-# Fabrique l'image de chaque carte et du dos des cartes (rendue une fois dans un SubViewport).
-# Recto : valeur, nom codé, famille et BdC lisibles ; illustration et texte floutés.
-# Pour remplacer l'illustration d'une carte : déposer res://cards/art/<numéro>.png.
+# Image de chaque carte et du dos des cartes.
+# Recto : l'image de la carte de l'auteur, entièrement floutée (res://cards/faces/<numéro>.png).
+# Si elle manque, une carte est reconstruite (valeur, nom codé, famille et BdC lisibles ;
+# illustration et texte floutés), rendue une fois dans un SubViewport.
 
 extends Node
 
@@ -58,7 +59,8 @@ func build() -> void:
 	_image_shader.code = BLUR_IMAGE_SHADER
 	_text_shader.code = BLUR_TEXT_SHADER
 	for id in CardDB.all_ids():
-		faces[id] = _render(_face(id))
+		var path := "res://cards/faces/%d.png" % id
+		faces[id] = load(path) if ResourceLoader.exists(path) else _render(_face(id))
 	back = _render(_back())
 
 
