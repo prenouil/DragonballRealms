@@ -6,6 +6,7 @@ const CardDB = preload("res://scripts/card_db.gd")
 const Scoring = preload("res://scripts/scoring.gd")
 const Game = preload("res://scripts/game.gd")
 const CardFace = preload("res://scripts/card_face.gd")
+const Choices = preload("res://scripts/choices.gd")
 
 const HUMAN := 0
 const PLAYERS := 4
@@ -27,6 +28,7 @@ static var autostart_seed := -1   # tests : graine fixe
 static var bot_delay_override := -1.0
 
 var game: Game
+var choices: Choices
 var faces: CardFace
 var camera: Camera3D
 var card_nodes := {}      # numéro -> Node3D
@@ -72,6 +74,10 @@ func _ready() -> void:
 	_build_camera()
 	_build_cards()
 	_build_hud()
+	choices = Choices.new()
+	choices.main = self
+	add_child(choices)
+	choices.validated.connect(func(v): game.answer(v))
 
 	game = Game.new()
 	game.name = "Game"
@@ -374,7 +380,10 @@ func _build_hud() -> void:
 	zoom_text.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vb.add_child(zoom_text)
 	zoom_panel.visible = false
-	layer.add_child(zoom_panel)
+	var zoom_layer := CanvasLayer.new()
+	zoom_layer.layer = 8  # au-dessus des fenêtres de choix
+	add_child(zoom_layer)
+	zoom_layer.add_child(zoom_panel)
 
 	dialog_layer = CanvasLayer.new()
 	dialog_layer.layer = 5
@@ -490,7 +499,8 @@ func _layout() -> void:
 		var in_deck := not placed.has(id)
 		var target: Transform3D = _targets.get(id, Transform3D(Basis(), DECK_POS))
 		var mat: StandardMaterial3D = _card_mats[id]
-		mat.albedo_color = Color(0.35, 0.35, 0.35) if game.masked_discard.has(id) else (HIGHLIGHT if _selected.has(id) else Color.WHITE)
+		var lit := _selected.has(id) or choices.card_pending(id)
+		mat.albedo_color = Color(0.35, 0.35, 0.35) if game.masked_discard.has(id) else (HIGHLIGHT if lit else Color.WHITE)
 		if in_deck:
 			node.visible = false
 			node.transform = target
@@ -556,7 +566,9 @@ func _refresh_hud() -> void:
 		"over":
 			hud_status.text = "Partie terminée"
 	var hand: Array = game.hands[HUMAN]
-	if hand.size() == Game.HAND_SIZE or game.phase == "over":
+	if game.phase == "over" and game.results.size() > HUMAN:
+		hud_score.text = "Ton score : %d" % game.results[HUMAN].total
+	elif hand.size() == Game.HAND_SIZE:
 		hud_score.text = "Score de ta main : %d" % Scoring.best(hand, game.score_ctx()).total
 	elif game.phase == "discard":
 		hud_score.text = "Survole une carte pour voir ton score si tu la défausses"
@@ -585,6 +597,8 @@ func _on_turn_started(_player: int) -> void:
 # --- Souris -------------------------------------------------------------------
 
 func _hand_clickable() -> bool:
+	if choices.active():
+		return choices.handles(_hovered)
 	return game.current == HUMAN and (game.phase == "discard" or game.phase == "baba_discard")
 
 
@@ -615,7 +629,7 @@ func _on_card_hover(id: int, entered: bool) -> void:
 		return
 	_hovered = id
 	var extra := ""
-	if loc == "hand" and _discard_preview.has(id):
+	if loc == "hand" and game.phase == "discard" and _discard_preview.has(id):
 		extra = "Si tu la défausses : score %d" % _discard_preview[id]
 	if loc == "discard" and game.masked_discard.has(id):
 		extra = "Masquée par FOR#50"
@@ -627,6 +641,9 @@ func _on_card_input(id: int, event: InputEvent) -> void:
 	if not (event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT):
 		return
 	if dialog_layer.get_child_count() > 0:
+		return
+	if choices.handles(id) and game.hands[HUMAN].has(id):
+		choices.open_for_card(id)
 		return
 	var loc := _card_location(id)
 	if loc == "discard" and _discard_clickable():
@@ -725,10 +742,26 @@ func _dialog_box(title: String) -> VBoxContainer:
 
 
 func _close_dialog(value) -> void:
+	_clear_dialogs()
+	game.answer(value)
+
+
+func _clear_dialogs() -> void:
 	for c in dialog_layer.get_children():
+		dialog_layer.remove_child(c)
 		c.queue_free()
 	zoom_panel.visible = false
-	game.answer(value)
+
+
+func refresh_cards() -> void:
+	_layout()
+
+
+# Répond à la question en cours sans passer par l'interface (tests).
+func auto_answer(value) -> void:
+	if choices.active():
+		choices.close()
+	_close_dialog(value)
 
 
 func _yes_no(title: String, yes_text := "Oui", no_text := "Non") -> void:
@@ -782,12 +815,11 @@ func _on_choice_requested(kind: String, data: Dictionary) -> void:
 			_yes_no("MOD#31 : chercher SAN#1 dans la pioche et le placer dans la défausse ?\n(MOD#31 est alors mélangé avec la pioche)")
 		"machine":
 			_yes_no("MAC#33 : rejouer immédiatement ?")
-		"end_mask":
-			_pick_card("FIN DE PARTIE #1 (FOR#50) : tu peux masquer une carte de la défausse", data.options, true)
-		"end_take":
-			var title := "FIN DE PARTIE #2 (RAD#42) : tu peux prendre une BdC dans la défausse" if data.effect == 42 \
-				else "FIN DE PARTIE #3 (SHE#54) : tu peux prendre une carte de la défausse (sauf une BdC)"
-			_pick_card(title, data.options, true)
+		"end_mask", "end_take":
+			choices.start_end(kind, data)
+		"scoring":
+			if not choices.start_scoring(data.hand, data.ctx):
+				game.answer.call_deferred({})
 		"sangoku":
 			_yes_no("SAN#1 est dans la défausse. Veux-tu le compter comme 8e carte de ta main ?\nAvec : %d points  ·  Sans : %d points" % [data["with"], data.without],
 				"Oui, je l'inclus", "Non")

@@ -309,7 +309,14 @@ func _end_game() -> void:
 		if included_sangoku[p]:
 			hand.append(SAN1)
 			d.erase(SAN1)
-		var r := Scoring.best(hand, {"discard": d, "premasked": masked_discard})
+		var ctx := {"discard": d, "premasked": masked_discard}
+		var r: Dictionary
+		if humans[p] and not Scoring.choice_specs(hand).is_empty():
+			# Le joueur humain fait lui-même les choix de ses cartes.
+			var choices: Dictionary = await _ask(p, "scoring", {"hand": hand, "ctx": ctx}, func(): return {})
+			r = Scoring.evaluate(hand, ctx, choices)
+		else:
+			r = Scoring.best(hand, ctx)
 		r["player"] = p
 		r["name"] = names[p]
 		r["hand"] = hand

@@ -5,6 +5,9 @@
 #   SHOT_AUTOPLAY=1 : le joueur humain joue tout seul (pioche, défausse la 1re carte, répond aux
 #                     questions) et la capture est prise 1,5 s après la fin de la partie.
 #   SHOT_SPEED : pause des ordinateurs en secondes (défaut 0,9)
+#   SHOT_HAND="37,44,52" : cartes données au joueur au début (échangées avec sa main)
+#   SHOT_CHOICES=1 : en partie automatique, s'arrête aux choix du décompte et les photographie ;
+#                    SHOT_CHOICES=picker : ouvre aussi la fenêtre du premier choix.
 extends SceneTree
 
 const Main = preload("res://scripts/main.gd")
@@ -14,6 +17,8 @@ var _wait := 2.0
 var _autoplay := false
 var _over_since := -1.0
 var _main: Node
+var _hand_done := false
+var _choices_since := -1.0
 
 
 func _initialize() -> void:
@@ -33,6 +38,11 @@ func _initialize() -> void:
 func _process(delta: float) -> bool:
 	if _autoplay:
 		_play()
+		if _choices_since >= 0.0:
+			_choices_since += delta
+			if _choices_since > 1.2:
+				_capture()
+			return false
 		if _over_since >= 0.0:
 			_over_since += delta
 			if _over_since > 1.5:
@@ -51,6 +61,10 @@ func _play() -> void:
 	var game: Node = main.game
 	if not game.choice_requested.is_connected(_on_choice):
 		game.choice_requested.connect(_on_choice)
+	if not _hand_done and game.hands.size() > 0:
+		_hand_done = true
+		if OS.has_environment("SHOT_HAND"):
+			_give_hand(game, OS.get_environment("SHOT_HAND").split(","))
 	if game.phase == "over" and _over_since < 0.0:
 		_over_since = 0.0
 	if game.current != 0:
@@ -58,7 +72,13 @@ func _play() -> void:
 	if game.phase == "draw":
 		game.human_draw_deck(0)
 	elif game.phase == "discard":
-		game.human_discard(0, game.hands[0][0])
+		var keep := OS.get_environment("SHOT_HAND").split(",") if OS.has_environment("SHOT_HAND") else PackedStringArray()
+		var drop: int = game.hands[0][0]
+		for c in game.hands[0]:
+			if not keep.has(str(c)):
+				drop = c
+				break
+		game.human_discard(0, drop)
 
 
 func _on_choice(kind: String, data: Dictionary) -> void:
@@ -71,8 +91,38 @@ func _on_choice(kind: String, data: Dictionary) -> void:
 			value = -1
 		"sangoku":
 			value = true
+		"scoring":
+			if OS.has_environment("SHOT_CHOICES"):
+				_choices_since = 0.0
+				if OS.get_environment("SHOT_CHOICES") == "picker":
+					main.choices.call_deferred("_open_picker", 0)
+				return
+			value = load("res://scripts/scoring.gd").best(data.hand, data.ctx).choices
 	# Ferme la fenêtre de question comme le ferait un clic.
-	main.call_deferred("_close_dialog", value)
+	main.call_deferred("auto_answer", value)
+
+
+# Échange des cartes pour donner au joueur 0 les cartes voulues.
+func _give_hand(game: Node, wanted: PackedStringArray) -> void:
+	var mine: Array = game.hands[0]
+	for w in wanted:
+		var id := int(w)
+		if mine.has(id):
+			continue
+		var give := -1
+		for c in mine:
+			if not wanted.has(str(c)):
+				give = c
+				break
+		if give < 0:
+			return
+		for pile in [game.deck, game.discard] + game.hands.slice(1):
+			var k: int = pile.find(id)
+			if k >= 0:
+				pile[k] = give
+				mine[mine.find(give)] = id
+				break
+	game.changed.emit()
 
 
 func _capture() -> void:

@@ -15,7 +15,8 @@ Godot : `C:\Users\user\Desktop\Godot_v4.7.2-stable_win64.exe\Godot_v4.7.2-stable
   - `Godot --headless --path . --script res://tests/test_simulation.gd -- 10` (parties entre 4 ordinateurs)
   - `Godot --headless --path . --script res://tests/test_boot.gd`
 - Capture d'écran : `Godot --path . --script res://tests/screenshot.gd -- <fichier.png> [secondes]`
-  (`SHOT_AUTOPLAY=1` joue la partie entière et capture l'écran de fin ; `SHOT_SEED`, `SHOT_SPEED`)
+  (`SHOT_AUTOPLAY=1` joue la partie entière et capture l'écran de fin ; `SHOT_SEED`, `SHOT_SPEED`,
+  `SHOT_HAND="37,44,52"` main imposée, `SHOT_CHOICES=1|picker` capture les choix du décompte)
 
 ## Organisation
 
@@ -27,6 +28,8 @@ Godot : `C:\Users\user\Desktop\Godot_v4.7.2-stable_win64.exe\Godot_v4.7.2-stable
 - `scripts/bot.gd` : décisions des ordinateurs (comparaison des scores).
 - `scripts/card_face.gd` : images des cartes rendues dans des SubViewport (illustration et texte floutés,
   ou `res://cards/art/<numéro>.png`).
+- `scripts/choices.gd` : choix du joueur humain au décompte et pour FIN DE PARTIE (cartes en surbrillance,
+  fenêtres de tous les choix possibles, Annuler / Valider).
 - `scripts/main.gd` : table 3D, personnages, placement animé des 54 cartes, interface, fenêtres de choix, écran de fin.
 
 ## Conventions

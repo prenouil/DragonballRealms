@@ -180,7 +180,7 @@ static func choice_specs(hand: Array) -> Array:
 		for f in range(1, 12):
 			var cands := []
 			for id in hand:
-				if id != BRO and id != SEN and (CardDB.family(id) == f or CardDB.family(id) == JOK):
+				if id != BRO and id != SEN and CardDB.family(id) == f:
 					cands.append(id)
 			if cands.size() > 1:
 				specs.append({"key": "bro%d" % f, "options": cands})
@@ -398,7 +398,12 @@ static func _apply_masks(cs: Array, masked: Dictionary, cleared: Dictionary, imm
 							cands.append(j)
 					if cands.size() <= 1:
 						continue
+					# Carte gardée : celle choisie, sinon la première qui n'est pas un joker.
 					var keep: int = cands[0]
+					for j in cands:
+						if CardDB.family(cs[j].id) != JOK:
+							keep = j
+							break
 					var wanted: int = choices.get("bro%d" % f, -1)
 					for j in cands:
 						if cs[j].id == wanted:

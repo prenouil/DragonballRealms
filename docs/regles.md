@@ -25,9 +25,11 @@ Les règles sont celles de **Fantasy Realms**, avec les 54 cartes du jeu.
 
 ## Interprétations retenues (à valider)
 
-- **Choix au décompte** (cible d'`EXP#37`, carte protégée par `SEN#44` ou `CHA#9`, identité des jokers,
-  famille changée par `TRA#47`, carte gardée par `BRO#5`, `PIL#19` ENN_4 ou non) : faits automatiquement,
-  au mieux pour chaque joueur.
+- **Choix au décompte** (cible d'`EXP#37`, carte protégée par `SEN#44` ou `CHA#9`, carte copiée par `OOL#51`,
+  identité de `DRB#52` / `CHA#53`, famille changée par `TRA#47`, carte gardée par `BRO#5`, `PIL#19` ENN_4 ou non) :
+  tu les fais toi-même (cartes en surbrillance : clic pour voir tous les choix, « Annuler » pour revenir sur
+  un choix, « Valider » quand tout est choisi). Les ordinateurs choisissent au mieux pour eux.
+- **Effets FIN DE PARTIE** de tes cartes (`FOR#50`, `RAD#42`, `SHE#54`) : même principe, clic sur la carte.
 - **Cartes masquées** : une carte masquée n'a plus aucun effet. Si deux cartes se masquent l'une l'autre,
   elles restent masquées toutes les deux.
 - **`DET#43`** : on le défausse à la place de piocher, on garde 1 des 3 cartes du dessus de la pioche,
@@ -38,7 +40,8 @@ Les règles sont celles de **Fantasy Realms**, avec les 54 cartes du jeu.
   (SAY_1, COM_2, ALL_3, MAI_5 ou ENN_4, sauf `BRO#5`).
 - **`DRB#52` / `CHA#53`** : peuvent prendre le nom et la famille de **n'importe quelle carte du jeu** (comme dans Fantasy Realms).
 - **`BRO#5`** : pour chaque famille, il ne reste qu'une carte non immunisée ; les autres sont masquées
-  (une carte de plusieurs familles peut être masquée par l'une d'elles).
+  (une carte de plusieurs familles peut être masquée par l'une d'elles). On choisit la carte gardée parmi les
+  cartes de la famille imprimée ; un joker qui prend cette famille est masqué.
 - **« +X par A, B, C »** : chaque nom compte une fois.
 - **`MAI#24`** : une carte qui est à la fois SAY_1 et COM_2 compte une fois.
 - **`FOR#50`** : une carte de la défausse masquée le reste si elle est reprise (`RAD#42`, `SHE#54`, `SAN#1` en 8e carte).
