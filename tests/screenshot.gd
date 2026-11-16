@@ -20,6 +20,7 @@ var _main: Node
 var _hand_done := false
 var _timed := false  # partie automatique : capture à [secondes] si elles sont données
 var _choices_since := -1.0
+var _pick_at := 0
 
 
 func _initialize() -> void:
@@ -87,7 +88,15 @@ func _play() -> void:
 			if not keep.has(str(c)):
 				drop = c
 				break
-		game.human_discard(0, drop)
+		# Comme le joueur : 1er clic (la carte grandit), puis 2e clic 1 s plus tard (défausse).
+		var click := InputEventMouseButton.new()
+		click.pressed = true
+		click.button_index = MOUSE_BUTTON_LEFT
+		if main._pick != drop:
+			_pick_at = Time.get_ticks_msec()
+			main._on_card_input(drop, click)
+		elif Time.get_ticks_msec() - _pick_at > 1000:
+			main._on_card_input(drop, click)
 
 
 func _on_choice(kind: String, data: Dictionary) -> void:

@@ -9,7 +9,8 @@ Jeu de cartes en 3D (Godot 4.7) aux règles de Fantasy Realms : toi contre 3 ord
 
 - Survoler une carte : l'afficher en grand, avec son texte.
 - Clic sur la pioche ou sur une carte de la défausse : la prendre.
-- Clic sur une carte de ta main : la défausser.
+- Clic sur une carte de ta main : elle grandit (carte choisie) ; second clic : la défausser.
+  Clic ailleurs ou clic droit : annuler le choix.
 - Boutons « Utiliser DET#43 » et « Utiliser BAB#25 » quand tu as ces cartes.
 
 ## Images des cartes

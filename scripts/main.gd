@@ -28,6 +28,9 @@ const DECK_LIFT_TIME := 0.7     # départ lent d'une carte piochée par un ordin
 const SHIRT_COLORS := [Color(0.2, 0.3, 0.6), Color(0.7, 0.2, 0.2), Color(0.2, 0.55, 0.3), Color(0.55, 0.3, 0.6)]
 const SKIN_COLORS := [Color(0.95, 0.8, 0.68), Color(0.85, 0.65, 0.5), Color(0.6, 0.42, 0.3), Color(0.98, 0.85, 0.75)]
 const HAIR_COLORS := [Color.BLACK, Color(0.85, 0.35, 0.1), Color(0.08, 0.06, 0.05), Color(0.9, 0.82, 0.5)]
+const HAND_SCALE_WAIT := 0.75   # ta main pendant que les autres jouent...
+const HAND_SCALE_TURN := 1.15   # ...quand c'est à toi
+const PICK_SCALE := 1.6         # carte choisie pour être défaussée (2e clic : défausser)
 const LIGHT_FOLLOW_SPEED := 2.2  # plus c'est bas, plus la lumière de tour est en retard
 const LIGHT_ENERGY_BOT := 5.0    # lumière de tour sur un ordinateur...
 const LIGHT_ENERGY_HUMAN := 1.6  # ...et sur toi (plus douce : tes cartes sont dessous)
@@ -55,6 +58,7 @@ var _light_energy_goal := 5.0
 
 var _hovered := -1
 var _selected: Array = []          # cartes choisies (BAB#25)
+var _pick := -1                    # carte de ta main choisie pour être défaussée
 var _mode := ""                    # "", "baba_take", "baba_drop"
 var _discard_preview := {}         # carte de la main -> score si on la défausse
 var _messages: Array[String] = []
@@ -468,6 +472,7 @@ func _show_zoom(id: int, extra := "") -> void:
 func _on_changed() -> void:
 	if game.phase != "discard" or game.current != HUMAN:
 		_discard_preview.clear()
+		_pick = -1
 	elif _discard_preview.is_empty():
 		_compute_discard_preview()
 	_layout()
@@ -487,21 +492,30 @@ func _layout() -> void:
 	var placed := {}
 	var over := game.phase == "over"
 	# Main du joueur, triée par famille, en éventail face à la caméra.
+	# Petite quand les autres jouent, plus grande quand c'est à toi ; la carte à défausser grandit encore.
 	var hand: Array = _sorted(game.hands[HUMAN])
 	var n := hand.size()
+	var big := _hand_big()
+	var s := HAND_SCALE_TURN if big else HAND_SCALE_WAIT
+	var hand_y := 0.15 if big else 0.11
 	for k in n:
 		var id: int = hand[k]
-		var x := (k - (n - 1) / 2.0) * (CARD_W * 0.95)
-		var pos := Vector3(x, 0.15 - absf(x) * 0.08, 0.58)
+		var x := (k - (n - 1) / 2.0) * (CARD_W * 0.95) * s
+		var pos := Vector3(x, hand_y - absf(x) * 0.08, 0.58)
 		var lift := 0.0
 		if id == _hovered and _hand_clickable():
 			lift = 0.03
 		if _selected.has(id):
 			lift = 0.045
 		var basis := Basis.looking_at(pos - CAMERA_POS, Vector3.UP)
-		basis = basis * Basis(Vector3.BACK, -x * 0.6)
-		pos += basis.y * lift
-		_targets[id] = Transform3D(basis, pos)
+		basis = basis * Basis(Vector3.BACK, -x * 0.6 / s)
+		var card_scale := s
+		if id == _pick:
+			card_scale = PICK_SCALE
+			lift = 0.07
+			pos += (CAMERA_POS - pos).normalized() * 0.05  # devant ses voisines
+		pos += basis.y * lift * s
+		_targets[id] = Transform3D(basis.scaled_local(Vector3.ONE * card_scale), pos)
 		placed[id] = true
 	# Mains des adversaires : éventail tenu devant eux (dos vers le centre), étalées à la fin.
 	for p in range(1, PLAYERS):
@@ -579,8 +593,9 @@ func _move(node: Node3D, target: Transform3D, duration := MOVE_TIME) -> void:
 	var tw := create_tween().set_parallel(true).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 	tw.tween_property(node, "position", target.origin, duration)
 	tw.tween_property(node, "quaternion", target.basis.get_rotation_quaternion(), duration)
-	if not node.scale.is_equal_approx(Vector3.ONE):
-		tw.tween_property(node, "scale", Vector3.ONE, duration)
+	var goal_scale := target.basis.get_scale()
+	if not node.scale.is_equal_approx(goal_scale):
+		tw.tween_property(node, "scale", goal_scale, duration)
 	node.set_meta("tween", tw)
 
 
@@ -656,7 +671,10 @@ func _refresh_hud() -> void:
 			else:
 				hud_status.text = "%s réfléchit…" % game.names[game.current]
 		"discard":
-			hud_status.text = "À toi : défausse une carte de ta main" if my_turn else "%s réfléchit…" % game.names[game.current]
+			if my_turn and _pick >= 0:
+				hud_status.text = "Clique encore sur %s pour la défausser (ailleurs ou clic droit : annuler)" % CardDB.code(_pick)
+			else:
+				hud_status.text = "À toi : choisis une carte de ta main à défausser" if my_turn else "%s réfléchit…" % game.names[game.current]
 		"baba_discard":
 			hud_status.text = "BAB#25 : choisis 2 cartes à défausser avec BAB#25 (%d / 2)" % _selected.size() if my_turn else "%s réfléchit…" % game.names[game.current]
 		"busy":
@@ -702,6 +720,33 @@ func _hand_clickable() -> bool:
 	return game.current == HUMAN and (game.phase == "discard" or game.phase == "baba_discard")
 
 
+func _hand_big() -> bool:
+	if game.phase == "over" or choices.active():
+		return true
+	return game.current == HUMAN and game.phase != "end"
+
+
+# Annule la carte choisie pour être défaussée.
+func _cancel_pick() -> void:
+	if _pick < 0:
+		return
+	_pick = -1
+	if _hovered < 0:
+		zoom_panel.visible = false
+	_layout()
+	_refresh_hud()
+
+
+# Clic droit, ou clic gauche ailleurs que sur une carte de ta main : annule la sélection.
+func _unhandled_input(event: InputEvent) -> void:
+	if _pick < 0 or not (event is InputEventMouseButton and event.pressed):
+		return
+	if event.button_index == MOUSE_BUTTON_RIGHT:
+		_cancel_pick()
+	elif event.button_index == MOUSE_BUTTON_LEFT and not (_hovered >= 0 and game.hands[HUMAN].has(_hovered)):
+		_cancel_pick()
+
+
 func _discard_clickable() -> bool:
 	return game.current == HUMAN and game.phase == "draw"
 
@@ -721,7 +766,10 @@ func _on_card_hover(id: int, entered: bool) -> void:
 	if not entered:
 		if _hovered == id:
 			_hovered = -1
-			zoom_panel.visible = false
+			if _pick >= 0:
+				_show_zoom(_pick, _pick_text(_pick))  # la carte choisie reste affichée
+			else:
+				zoom_panel.visible = false
 			_layout()
 		return
 	var loc := _card_location(id)
@@ -729,12 +777,19 @@ func _on_card_hover(id: int, entered: bool) -> void:
 		return
 	_hovered = id
 	var extra := ""
-	if loc == "hand" and game.phase == "discard" and _discard_preview.has(id):
-		extra = "Si tu la défausses : score %d" % _discard_preview[id]
+	if loc == "hand" and game.phase == "discard":
+		extra = _pick_text(id)
 	if loc == "discard" and game.masked_discard.has(id):
 		extra = "Masquée par FOR#50"
 	_show_zoom(id, extra)
 	_layout()
+
+
+func _pick_text(id: int) -> String:
+	var text := "Si tu la défausses : score %d" % _discard_preview[id] if _discard_preview.has(id) else ""
+	if id == _pick:
+		text += ("\n" if text != "" else "") + "Clique encore pour la défausser (clic droit : annuler)"
+	return text
 
 
 func _on_card_input(id: int, event: InputEvent) -> void:
@@ -758,6 +813,14 @@ func _on_card_input(id: int, event: InputEvent) -> void:
 			game.human_take_discard(HUMAN, id)
 	elif loc == "hand" and game.current == HUMAN:
 		if game.phase == "discard":
+			if _pick != id:
+				# 1er clic : la carte grandit ; 2e clic : elle est défaussée.
+				_pick = id
+				_show_zoom(id, _pick_text(id))
+				_layout()
+				_refresh_hud()
+				return
+			_pick = -1
 			zoom_panel.visible = false
 			_hovered = -1
 			game.human_discard(HUMAN, id)
