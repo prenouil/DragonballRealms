@@ -1,5 +1,5 @@
 # Choix que le joueur humain fait lui-même en cliquant sur ses cartes :
-# - au décompte : EXP#37, SEN#44, CHA#9, OOL#51, DRB#52, CHA#53, TRA#47, PIL#19, BRO#5 ;
+# - au décompte : EXP#37, SEN#44, CHA#9, BUL#11, OOL#51, DRB#52, CHA#53, TRA#47, PIL#19, BRO#5 ;
 # - effets FIN DE PARTIE : FOR#50, RAD#42, SHE#54.
 # Les cartes concernées sont en surbrillance ; un clic (ou « Choisir ») affiche tous les choix
 # possibles. Chaque choix peut être annulé ; « Valider » n'est possible que quand tout est choisi.
@@ -19,6 +19,7 @@ const LABELS := {
 	"sen": [44, "SEN#44 : protéger une autre carte"],
 	"cha": [9, "CHA#9 : se masquer pour protéger une autre carte"],
 	"exp": [37, "EXP#37 : masquer une autre carte"],
+	"bul": [11, "BUL#11 : protéger une BdC de ta main"],
 }
 
 var main: Node           # main.gd : cartes, fenêtres, carte agrandie

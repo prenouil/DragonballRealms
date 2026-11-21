@@ -151,11 +151,12 @@ static func choice_specs(hand: Array) -> Array:
 				a.append(id)
 		return a
 	if hand.has(OOL):
-		var opts := [-1]
+		# OOL#51 copie obligatoirement une autre carte (s'il y en a une autre que BRO#5).
+		var opts := []
 		for id in hand:
 			if id != OOL and id != BRO:
 				opts.append(id)
-		specs.append({"key": "ool", "options": opts})
+		specs.append({"key": "ool", "options": opts if not opts.is_empty() else [-1]})
 	if hand.has(DRB):
 		specs.append({"key": "drb", "options": [-1] + CardDB.ids_of_families([DEP, OBJ, LIE, TEC, TRA])})
 	if hand.has(CHG):
@@ -173,6 +174,9 @@ static func choice_specs(hand: Array) -> Array:
 		specs.append({"key": "sen", "options": [-1] + others.call(SEN)})
 	if hand.has(CHA):
 		specs.append({"key": "cha", "options": [-1] + others.call(CHA)})
+	if hand.has(BUL):
+		# BUL#11 : une BdC de la main (BUL#11 compris) ne peut pas être masquée.
+		specs.append({"key": "bul", "options": [-1] + hand.filter(func(id): return CardDB.is_bdc(id))})
 	if hand.has(EXP):
 		var opts: Array = others.call(EXP)
 		specs.append({"key": "exp", "options": opts if not opts.is_empty() else [-1]})
@@ -307,6 +311,10 @@ static func evaluate(hand: Array, ctx: Dictionary, choices: Dictionary) -> Dicti
 		previous = masked
 		masked = new_masked
 
+	var t_bul: int = choices.get("bul", -1)
+	if index_of.has(BUL) and index_of.has(t_bul) and not masked.has(index_of[BUL]) and CardDB.is_bdc(t_bul):
+		cs[index_of[t_bul]].notes.append("protégée par BUL#11")
+
 	# --- 3. Points -----------------------------------------------------------------
 	var got_active := false   # malus de GOT#3 (ou d'une copie) : enlève les bonus des SAY_1 / COM_2
 	var got_source := -1
@@ -370,10 +378,21 @@ static func _apply_masks(cs: Array, masked: Dictionary, cleared: Dictionary, imm
 	var out := fixed.duplicate()
 	var exp_hit := false
 	var n := cs.size()
-	var hit := func(j: int, ignore_protection: bool) -> bool:
+	# BUL#11 (non masqué) : la BdC choisie ne peut pas être masquée (sauf par EXP#37, qui ignore les protections).
+	var shield := -1
+	var t_bul: int = choices.get("bul", -1)
+	for j in n:
+		if cs[j].id == BUL and not masked.has(j):
+			for k in n:
+				if cs[k].id == t_bul and cs[k].bdc:
+					shield = k
+	# by : 0 effet ordinaire, 1 BRO#5 (passe les protections de SEN#44 et CHA#9), 2 EXP#37 (passe toutes les protections).
+	var hit := func(j: int, by: int) -> bool:
 		if immune.has(j):
 			return false
-		if protected.has(j) and not ignore_protection:
+		if protected.has(j) and by == 0:
+			return false
+		if j == shield and by != 2:
 			return false
 		out[j] = true
 		return true
@@ -385,7 +404,7 @@ static func _apply_masks(cs: Array, masked: Dictionary, cleared: Dictionary, imm
 		if c.id == PIC and c.pic == 2:
 			for j in n:
 				if j != i and cs[j].names.has(TPU):
-					hit.call(j, false)
+					hit.call(j, 0)
 		var m: int = c.malus
 		if m <= 0 or (cleared.has(i) and m != BRO):
 			continue
@@ -394,7 +413,7 @@ static func _apply_masks(cs: Array, masked: Dictionary, cleared: Dictionary, imm
 				for f in range(1, 12):
 					var cands := []
 					for j in n:
-						if j != i and not immune.has(j) and cs[j].fams.has(f):
+						if j != i and not immune.has(j) and j != shield and cs[j].fams.has(f):
 							cands.append(j)
 					if cands.size() <= 1:
 						continue
@@ -410,59 +429,59 @@ static func _apply_masks(cs: Array, masked: Dictionary, cleared: Dictionary, imm
 							keep = j
 					for j in cands:
 						if j != keep:
-							hit.call(j, true)
+							hit.call(j, 1)
 			YAM:
 				if _count_bdc(cs, masked, i) == 0:
-					hit.call(i, false)
+					hit.call(i, 0)
 			TEN:
 				var cha_masked := false
 				for j in n:
 					if cs[j].id == CHA and masked.has(j):
 						cha_masked = true
 				if cha_masked or discard.has(CHA):
-					hit.call(i, false)
+					hit.call(i, 0)
 			YAJ:
 				if _count_fam(cs, masked, ENN, i) > 0:
-					hit.call(i, false)
+					hit.call(i, 0)
 			CEL:
 				for j in n:
 					if j != i and (cs[j].fams.has(COM) or cs[j].fams.has(MAI) or cs[j].names.has(SAT)):
-						hit.call(j, false)
+						hit.call(j, 0)
 			FRE:
 				for j in n:
 					if j == i:
 						continue
 					if cs[j].names.has(KRI) or cs[j].names.has(VEG) or (cs[j].bdc and not cs[j].names.has(SAN1)):
-						hit.call(j, false)
+						hit.call(j, 0)
 			BUU:
 				for j in n:
 					if j != i and not cs[j].names.has(SAT) and (cs[j].fams.has(ENN) or cs[j].fams.has(MAI) or cs[j].fams.has(ALL)):
-						hit.call(j, false)
+						hit.call(j, 0)
 			PIL:
 				if _has_any_name(cs, masked, [PET], i):
-					hit.call(i, false)
+					hit.call(i, 0)
 			VEG:
 				if c.fams.has(ENN):
 					for j in n:
 						if j != i and cs[j].fams.has(COM):
-							hit.call(j, false)
+							hit.call(j, 0)
 			EXP:
 				if exp_target >= 0 and exp_target != i:
-					if hit.call(exp_target, true):
+					if hit.call(exp_target, 2):
 						exp_hit = true
 			KIE:
 				for j in n:
 					if j != i and (cs[j].fams.has(SAY) or cs[j].names.has(FRE) or cs[j].names.has(SIN)):
-						hit.call(j, false)
+						hit.call(j, 0)
 			SIN:
 				if _count_fam(cs, masked, SAY, i) == 0 and not _has_any_name(cs, masked, [VEG], i):
-					hit.call(i, false)
+					hit.call(i, 0)
 			SUP:
 				if _count_fam(cs, masked, SAY, i) == 0:
-					hit.call(i, false)
+					hit.call(i, 0)
 			SHE:
 				if _count_bdc(cs, masked, i) == 0:
-					hit.call(i, false)
+					hit.call(i, 0)
 	return {"masked": out, "exp_hit": exp_hit}
 
 
@@ -476,9 +495,9 @@ static func _bonus(cs: Array, i: int, masked: Dictionary, discard: Array, premas
 			var k := _names_present(cs, masked, [BUL, VEG, MAC], i)
 			return 100 if k == 3 else 15 * k
 		KRI:
-			return (15 if _count_fam(cs, masked, TEC, i) > 0 else 0) + 10 * _count_fam(cs, masked, ALL, i)
+			return 15 * _names_present(cs, masked, [KAM, KIE, TOR], i) + (25 if _count_fam(cs, masked, ENN, i) > 0 else 0)
 		YAM:
-			return 8 * (_count_fam(cs, masked, ALL, i) + _count_fam(cs, masked, COM, i))
+			return 8 * (_count_fam(cs, masked, ALL, i) + _count_fam(cs, masked, MAI, i) + _count_fam(cs, masked, COM, i))
 		TEN:
 			return 11 * _names_present(cs, masked, [SAN1, YAM, TOR], i)
 		CHA:
@@ -490,11 +509,7 @@ static func _bonus(cs: Array, i: int, masked: Dictionary, discard: Array, premas
 				return 20
 			return 0
 		BUL:
-			var cites := 0
-			for j in cs.size():
-				if j != i and not masked.has(j) and CardDB.cites_bulma(cs[j].id):
-					cites += 1
-			return 8 * _count_fam(cs, masked, OBJ, i) + 5 * cites
+			return 8 * (_count_fam(cs, masked, DEP, i) + _count_fam(cs, masked, OBJ, i))
 		YAJ:
 			return 20 if _has_any_name(cs, masked, [SEN, CAN], i) else 0
 		VID:
@@ -514,9 +529,9 @@ static func _bonus(cs: Array, i: int, masked: Dictionary, discard: Array, premas
 		CEL:
 			return (20 if _has_any_name(cs, masked, [MAC], i) else 0) + 13 * _count_fam(cs, masked, SAY, i)
 		BUU:
-			return 25 * masked.size()
+			return 30 * masked.size()
 		PIL:
-			return 11 * _count_bdc(cs, masked, i)
+			return 9 * _count_bdc(cs, masked, i)
 		VEG:
 			return 20 if c.veg and _has_any_name(cs, masked, [TRU, GOT, BUL], i) else 0
 		TOR:
@@ -528,8 +543,8 @@ static func _bonus(cs: Array, i: int, masked: Dictionary, discard: Array, premas
 			if best_count >= 5:
 				return 120
 			if best_count == 4:
-				return 60
-			return 20 if best_count == 3 else 0
+				return 70
+			return 30 if best_count == 3 else 0
 		TPU:
 			return (21 if _has_any_name(cs, masked, [SHE], i) else 0) + 14 * _names_present(cs, masked, [PLA, VAI], i)
 		KAI:
@@ -546,7 +561,7 @@ static func _bonus(cs: Array, i: int, masked: Dictionary, discard: Array, premas
 		PLA:
 			return 10 * _count_fam(cs, masked, DEP, i)
 		KAH:
-			return 11 * _count_fam(cs, masked, ALL, i) + 5 * _count_fam(cs, masked, COM, i) + 5 * _count_fam(cs, masked, LIE, i)
+			return 11 * _count_fam(cs, masked, ALL, i) + 8 * _count_fam(cs, masked, COM, i)
 		CAN:
 			var masked_com := 0
 			for j in masked:
@@ -564,7 +579,9 @@ static func _bonus(cs: Array, i: int, masked: Dictionary, discard: Array, premas
 		VAI:
 			return 7 * _count_fam(cs, masked, LIE, i) + 7 * _count_fam(cs, masked, DEP, i)
 		NUA:
-			return 17 if _has_any_name(cs, masked, [KAR, SAN1, SAN2], i) else 0
+			if _has_any_name(cs, masked, [KAR, SAN2], i):
+				return 27
+			return 7 if _has_any_name(cs, masked, [SAN1], i) else 0
 		DIN:
 			return 9 * _count_fam(cs, masked, LIE, i) + (10 if _has_any_name(cs, masked, [SAN1], i) else 0)
 		EXP:
@@ -576,10 +593,10 @@ static func _bonus(cs: Array, i: int, masked: Dictionary, discard: Array, premas
 		GEN:
 			if _has_any_name(cs, masked, [SAN1], i) and _count_fam(cs, masked, ENN, i) > 0 \
 					and _count_fam(cs, masked, LIE, i) > 0 and _count_fam(cs, masked, DEP, i) > 0:
-				return 60
+				return 45
 			return 0
 		IMA:
-			return 8 * _count_fam(cs, masked, TEC, i)
+			return 12 * _count_fam(cs, masked, TEC, i)
 		PET:
 			var b := 0
 			if _has_any_name(cs, masked, [BUL], i) != _has_any_name(cs, masked, [TOR], i):
@@ -601,7 +618,7 @@ static func _bonus(cs: Array, i: int, masked: Dictionary, discard: Array, premas
 			for j in cs.size():
 				if j == i or masked.has(j) or cs[j].names.has(BRO):
 					continue
-				for f in [SAY, COM, ALL, MAI, ENN]:
+				for f in [SAY, COM, ALL, MAI]:
 					if cs[j].fams.has(f):
 						best_base = maxi(best_base, cs[j].base)
 			return b + best_base

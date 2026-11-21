@@ -21,11 +21,11 @@ Les règles sont celles de **Fantasy Realms**, avec les 54 cartes du jeu.
    seulement pour les cartes **dans la main** d'un joueur.
 2. Si `SAN#1` est dans la défausse, chaque joueur choisit de le compter ou non comme 8e carte.
 3. Score : valeur de base + bonus + malus des cartes non masquées, plus le barème des BdC
-   (nombre de BdC dans la main : 1 → 0, 2 → 5, 3 → 20, 4 → 45, 5 → 80, 6 → 125, 7 → 180).
+   (nombre de BdC dans la main : 1 → 0, 2 → 5, 3 → 15, 4 → 30, 5 → 50, 6 → 75, 7 → 105).
 
 ## Interprétations retenues (à valider)
 
-- **Choix au décompte** (cible d'`EXP#37`, carte protégée par `SEN#44` ou `CHA#9`, carte copiée par `OOL#51`,
+- **Choix au décompte** (cible d'`EXP#37`, carte protégée par `SEN#44`, `CHA#9` ou `BUL#11`, carte copiée par `OOL#51`,
   identité de `DRB#52` / `CHA#53`, famille changée par `TRA#47`, carte gardée par `BRO#5`, `PIL#19` ENN_4 ou non) :
   tu les fais toi-même (cartes en surbrillance : clic pour voir tous les choix, « Annuler » pour revenir sur
   un choix, « Valider » quand tout est choisi). Les ordinateurs choisissent au mieux pour eux.
@@ -37,7 +37,7 @@ Les règles sont celles de **Fantasy Realms**, avec les 54 cartes du jeu.
 - **`BAB#25`** : à la place de piocher, on prend 3 cartes de la défausse puis on en défausse 3, dont `BAB#25`.
 - **`MAC#33`** et **`MOD#31`** s'appliquent aussi quand ils sont défaussés avec `BAB#25`.
 - **`ASS#49`** : ajoute la plus forte valeur de base parmi les autres cartes de **ta main**
-  (SAY_1, COM_2, ALL_3, MAI_5 ou ENN_4, sauf `BRO#5`).
+  (SAY_1, COM_2, ALL_3 ou MAI_5, sauf `BRO#5`).
 - **`DRB#52` / `CHA#53`** : peuvent prendre le nom et la famille de **n'importe quelle carte du jeu** (comme dans Fantasy Realms).
 - **`BRO#5`** : pour chaque famille, il ne reste qu'une carte non immunisée ; les autres sont masquées
   (une carte de plusieurs familles peut être masquée par l'une d'elles). On choisit la carte gardée parmi les
@@ -46,3 +46,7 @@ Les règles sont celles de **Fantasy Realms**, avec les 54 cartes du jeu.
 - **`MAI#24`** : une carte qui est à la fois SAY_1 et COM_2 compte une fois.
 - **`FOR#50`** : une carte de la défausse masquée le reste si elle est reprise (`RAD#42`, `SHE#54`, `SAN#1` en 8e carte).
 - Une carte qui prend un nom (jokers, `OOL#51`) compte pour ce nom, mais pas comme BdC.
+- **`BUL#11`** (« Une BdC ne peut pas être masquée ») : tu choisis **une** BdC de ta main (`BUL#11` compris),
+  qui ne peut pas être masquée tant que `BUL#11` n'est pas masqué, même par `BRO#5` ; seul `EXP#37` passe outre
+  (« elle ne peut pas être protégée »). Tu peux aussi ne rien protéger.
+- **`OOL#51`** copie **obligatoirement** une autre carte de ta main (sauf `BRO#5`), s'il y en a une.
